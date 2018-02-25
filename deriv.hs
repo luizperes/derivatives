@@ -114,14 +114,28 @@ parseVariable (x:xs) =
 
 -- 4. Unparsing
 unparseME :: ME -> [Char]
-unparseME (Add me1 me2) = (unparseME me1) ++ "+" ++ (unparseME me2)
-unparseME (Sub me1 me2) = (unparseME me1) ++ "-" ++ (unparseME me2)
-unparseME (Mul me1 me2) = (unparseME me1) ++ "*" ++ (unparseME me2)
-unparseME (Power me1 n) = (unparseME me1) ++ "**" ++ (show n)
+unparseME (Add me1 me2) = (unparseME me1) ++ "+" ++ (unparseME (forceTerm me2))
+unparseME (Sub me1 me2) = (unparseME me1) ++ "-" ++ (unparseME (forceTerm me2))
+unparseME (Mul me1 me2) = (unparseME (forceTerm me1)) ++ "*" ++ (unparseME (forceFactor me2))
+unparseME (Power me1 n) = (unparseME (forceElement me1)) ++ "**" ++ (show n)
 unparseME (Neg me1) = "-" ++ (unparseME me1)
 unparseME (Group me1) = "(" ++ (unparseME me1) ++ ")"
 unparseME (Var c) = [c]
 unparseME (Num n) = (show n)
+
+forceTerm :: ME -> ME
+forceTerm (Add f g) = Group (Add f g)
+forceTerm (Sub f g) = Group (Sub f g)
+forceTerm (Neg f) = Group (Neg f)
+forceTerm x = x
+
+forceFactor :: ME -> ME
+forceFactor (Mul f g) = Group (Mul f g)
+forceFactor x = forceTerm x
+
+forceElement :: ME -> ME
+forceElement (Power f n) = Group (Power f n)
+forceElement x = forceFactor x
 
 -- 5. Differentiation Problem
 deriv :: ME -> Char -> ME
@@ -134,7 +148,7 @@ deriv (Neg me) var = Neg (deriv me var)
 deriv (Add me1 me2) var = Add (deriv me1 var) (deriv me2 var)
 deriv (Sub me1 me2) var = Sub (deriv me1 var) (deriv me2 var)
 deriv (Mul me1 me2) var = Add (Mul me2 (deriv me1 var)) (Mul me1 (deriv me2 var))
-deriv (Group me1) var = Group (deriv me1 var)
+deriv (Group me1) var = deriv me1 var
 deriv (Power me1 n) var =
   case n of
     0 -> Num 0
@@ -144,7 +158,7 @@ deriv (Power me1 n) var =
 simplifyME :: ME -> ME
 simplifyME (Var c) = makeVar c
 simplifyME (Num n) = makeNum n
-simplifyME (Neg me1) = makeNeg me1
+simplifyME (Neg me1) = makeNeg (simplifyME me1)
 simplifyME (Group me1) = makeGroup (simplifyME me1)
 simplifyME (Add me1 me2) = makeAdd (simplifyME me1) (simplifyME me2)
 simplifyME (Sub me1 me2) = makeSub (simplifyME me1) (simplifyME me2)
@@ -154,40 +168,42 @@ simplifyME (Power me1 n) = makePower (simplifyME me1) n
 makePower :: ME -> Int -> ME
 makePower me1 0 = Num 1
 makePower me1 1 = me1
-makePower (Num a) b = Num (a^b)
+makePower (Num a) b = Num (a ^ b)
 makePower me1 n = Power me1 n
 
 makeMul :: ME -> ME -> ME
 makeMul (Num 0) me1 = Num 0
 makeMul (Num 1) me1 = me1
-makeMul (Num a) (Num b) = Num (a*b)
+makeMul (Num a) (Num b) = Num (a * b)
 makeMul me1 (Num a) = makeMul (Num a) me1
 makeMul me1 (Mul me2 me3) = makeMul (makeMul me1 me2) me3
 makeMul (Power me1 a) (Power me2 b)
-  | me1 == me2 = (makePower me1 (a+b))
-  | otherwise = Mul (makePower me1 a) (makePower me2 b)
+  | me1 == me2 = (Power me1 (a + b))
+  | otherwise = Mul (Power me1 a) (Power me2 b)
+makeMul (Power me1 n) me2 = makeMul me2 (Power me1 n)
 makeMul me1 me2 = Mul me1 me2
 
 makeAdd :: ME -> ME -> ME
 makeAdd me1 (Num 0) = me1
 makeAdd (Num a) (Num b) = Num (a+b)
-makeAdd (Add me1 (Num a)) (Num b) = Add me1 (Num(a+b))
-makeAdd (Add me1 (Num a)) me2 = makeAdd (Add me1 me2) (Num a)
+makeAdd (Add me1 (Num a)) (Num b) = makeAdd me1 (Num(a + b))
+makeAdd (Add me1 (Num a)) me2 = makeAdd me1 (makeAdd me2 (Num a))
 makeAdd (Num a) me1 = makeAdd me1 (Num a)
 makeAdd (Mul (Num a) me1) (Mul (Num b) me2)
-  | me1 == me2 = (makeMul (Num (a+b)) me1)
-  | otherwise = Add (makeMul (Num a) me1) (makeMul (Num b) me2)
+  | me1 == me2 = (Mul (Num (a + b)) me1)
+  | otherwise = Add (Mul (Num a) me1) (Mul (Num b) me2)
 makeAdd me1 me2 = Add me1 me2
 
 makeSub :: ME -> ME -> ME
 makeSub (Num 0) me1 = makeNeg me1
 makeSub me1 (Num 0) = me1
-makeSub (Num a) (Num b) = Num (a+b)
+makeSub (Num a) (Num b) = Num (a - b)
 makeSub (Num a) me1 = makeAdd (makeNeg me1) (Num a)
-makeSub (Sub me1 (Num a)) (Num b) = Sub me1 (Num(a+b))
+makeSub (Sub me1 (Num a)) (Num b) = makeSub me1 (Num(a + b))
 makeSub me1 me2 = Sub me1 me2
 
 makeNeg :: ME -> ME
+makeNeg (Num 0) = Num 0
 makeNeg me1 = Neg me1
 
 makeGroup :: ME -> ME
