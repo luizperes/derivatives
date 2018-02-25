@@ -119,8 +119,8 @@ unparseME (Sub me1 me2) = (unparseME me1) ++ "-" ++ (unparseME me2)
 unparseME (Mul me1 me2) = (unparseME me1) ++ "*" ++ (unparseME me2)
 unparseME (Power me1 n) = (unparseME me1) ++ "**" ++ (show n)
 unparseME (Neg me1) = "-" ++ (unparseME me1)
-unparseME (Group me1) = '(': (unparseME me1) ++ ")"
-unparseME (Var c) = c:[]
+unparseME (Group me1) = "(" ++ (unparseME me1) ++ ")"
+unparseME (Var c) = [c]
 unparseME (Num n) = (show n)
 
 -- 5. Differentiation Problem
@@ -130,12 +130,15 @@ deriv (Var c) var =
   case (c == var) of
     True -> Num 1
     _ -> Num 0
-deriv (Neg me) var = Neg(Group(deriv me var))
+deriv (Neg me) var = Neg (deriv me var)
 deriv (Add me1 me2) var = Add (deriv me1 var) (deriv me2 var)
 deriv (Sub me1 me2) var = Sub (deriv me1 var) (deriv me2 var)
 deriv (Mul me1 me2) var = Add (Mul me2 (deriv me1 var)) (Mul me1 (deriv me2 var))
 deriv (Group me1) var = Group (deriv me1 var)
-deriv (Power me1 n) var = Mul (Num n) (Power me1 (n-1))
+deriv (Power me1 n) var =
+  case n of
+    0 -> Num 0
+    _ -> Mul (Mul (Num n) (Power me1 (n - 1))) (deriv me1 var)
 
 -- 6. Simplifying
 simplifyME :: ME -> ME
@@ -200,5 +203,5 @@ makeNum n = Num n
 main = do
   [equation, variable:rest] <- getArgs
   case parseME equation of
-    Just me -> print (unparseME(simplifyME(deriv (simplifyME(me)) variable)))
+    Just me -> print (unparseME(simplifyME(deriv me variable)))
     _ -> hPutStr stdout "Could not parse\n"
